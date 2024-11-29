@@ -4,20 +4,15 @@
 
 # COMMAND ----------
 
-import boto3
-
-s3 = boto3.client('s3')
-response = s3.list_objects(Bucket='chitraxi')
-
-for file in response['Contents']:
-    print(file['Key'])
-
-# COMMAND ----------
-
 # MAGIC %pip install --upgrade jinja2
 # MAGIC dbutils.library.restartPython()
 # MAGIC
 # MAGIC
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC describe whs_v.cards_payments_flat_fact
 
 # COMMAND ----------
 
@@ -61,7 +56,11 @@ mm_base = spark.sql(f"""
                 DISTINCT merchant_id,
                 COALESCE(c.billing_label, c.NAME) NAME ,
                 a.terminal_id,
-                'live' as terminal_flag,
+                case when date_diff(
+                DAY,
+                CAST(terminals.create_date AS date),
+                CAST(current_date AS date)
+              ) <= 20 then 'New' else 'Live' end  as terminal_flag,
                 IF(internal_external_flag = 'internal', 'razorpay', gateway) gateway, 
                 method_advanced , 
                 network, 
@@ -75,8 +74,9 @@ mm_base = spark.sql(f"""
                 count(DISTINCT CASE WHEN authorized_at IS NOT NULL THEN a.id END) total_success
 
                  FROM (select * from aggregate_ba.payments_optimizer_flag_sincejan2021 where created_date >= cast(CURRENT_DATE + interval '-7' day AS varchar(10)) and optimizer_flag = 1)  a 
-                 left join analytics_selfserve.optimizer_terminal_flag_trial b
-                 on a.terminal_id = b.terminal_id
+                 --left join analytics_selfserve.optimizer_terminal_flag_trial b
+                 --on a.terminal_id = b.terminal_id
+                left join (select terminal_id,procurer, min(created_date) as create_date from realtime_terminalslive.terminals group by 1,2) as terminals on terminals.terminal_id = a.terminal_id
                  inner JOIN realtime_hudi_api.merchants c 
                  ON a.merchant_id = c.id 
                  WHERE 
@@ -90,7 +90,7 @@ mm_base = spark.sql(f"""
                   --internal_external_flag != 'internal'
                   AND
                   merchant_id NOT IN ('ELi8nocD30pFkb','O99zYaQcbOQWyx','FYWytivdWJQXmR')
-                  AND procurer = 'merchant' 
+                  AND terminals.procurer = 'merchant' 
                   ---and a.id not in (select id from realtime_hudi_api.payments where created_date >= cast(CURRENT_DATE + interval '-7' day AS varchar(10)) and cps_route != 100 )
                 GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13
                     """)

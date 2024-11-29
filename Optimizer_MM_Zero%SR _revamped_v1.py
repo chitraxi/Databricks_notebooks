@@ -41,59 +41,22 @@ import numpy as np
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC REFRESH TABLE aggregate_ba.final_team_tagging;
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC SELECT 
-# MAGIC                 DISTINCT merchant_id,
-# MAGIC                 COALESCE(c.billing_label, c.NAME) NAME ,
-# MAGIC                 a.terminal_id,
-# MAGIC                 coalesce(b.terminal_flag,'New') as terminal_flag,
-# MAGIC                 IF(internal_external_flag = 'internal', 'razorpay', gateway) gateway, 
-# MAGIC                 method_advanced , 
-# MAGIC                 network, 
-# MAGIC                 network_tokenised_payment, 
-# MAGIC                 issuer, 
-# MAGIC                 upi_app, 
-# MAGIC                 wallet, 
-# MAGIC                 bank, 
-# MAGIC                 a.created_date, 
-# MAGIC                 count(DISTINCT a.id) AS total_attempts,
-# MAGIC                 count(DISTINCT CASE WHEN authorized_at IS NOT NULL THEN a.id END) total_success
-# MAGIC
-# MAGIC                  FROM (select * from aggregate_ba.payments_optimizer_flag_sincejan2021 where created_date >= cast(CURRENT_DATE + interval '-7' day AS varchar(10)) and optimizer_flag = 1)  a 
-# MAGIC                  left join analytics_selfserve.optimizer_terminal_flag_trial b
-# MAGIC                  on a.terminal_id = b.terminal_id
-# MAGIC                  inner JOIN realtime_hudi_api.merchants c 
-# MAGIC                  ON a.merchant_id = c.id 
-# MAGIC                  WHERE 
-# MAGIC                   
-# MAGIC                   merchant_id IN
-# MAGIC                                   (
-# MAGIC                                   SELECT DISTINCT merchant_id
+# MAGIC  SELECT DISTINCT merchant_id
 # MAGIC                                   FROM            aggregate_ba.final_team_tagging
-# MAGIC                                   WHERE        team_owner = 'Mid Market'   
-# MAGIC                                   --team_owner = 'Mid Market'
-# MAGIC                                   )
-# MAGIC                   --AND
-# MAGIC                   --internal_external_flag != 'internal'
-# MAGIC                   AND
-# MAGIC                   merchant_id NOT IN ('ELi8nocD30pFkb','O99zYaQcbOQWyx','FYWytivdWJQXmR')
-# MAGIC                   AND procurer = 'merchant'  
-# MAGIC                   --and a.id  in (select id from realtime_hudi_api.payments where created_date >= cast(CURRENT_DATE + interval '-7' day AS varchar(10)) and cps_route = 100 )
-# MAGIC                 GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13
+# MAGIC                                   --WHERE        team_owner = 'Mid Market'  
 
 # COMMAND ----------
 
 mm_base = spark.sql(f"""
- 
-         SELECT 
+SELECT 
                 DISTINCT merchant_id,
                 COALESCE(c.billing_label, c.NAME) NAME ,
                 a.terminal_id,
-                coalesce(b.terminal_flag,'New') as terminal_flag,
+                case when date_diff(
+                DAY,
+                CAST(terminals.create_date AS date),
+                CAST(current_date AS date)
+              ) <= 20 then 'New' else 'Live' end  as terminal_flag,
                 IF(internal_external_flag = 'internal', 'razorpay', gateway) gateway, 
                 method_advanced , 
                 network, 
@@ -107,8 +70,9 @@ mm_base = spark.sql(f"""
                 count(DISTINCT CASE WHEN authorized_at IS NOT NULL THEN a.id END) total_success
 
                  FROM (select * from aggregate_ba.payments_optimizer_flag_sincejan2021 where created_date >= cast(CURRENT_DATE + interval '-7' day AS varchar(10)) and optimizer_flag = 1)  a 
-                 left join analytics_selfserve.optimizer_terminal_flag_trial b
-                 on a.terminal_id = b.terminal_id
+                 --left join analytics_selfserve.optimizer_terminal_flag_trial b
+                 --on a.terminal_id = b.terminal_id
+                 left join (select terminal_id, min(created_date) as create_date from realtime_terminalslive.terminals group by 1) as terminals on terminals.terminal_id = a.terminal_id
                  inner JOIN realtime_hudi_api.merchants c 
                  ON a.merchant_id = c.id 
                  WHERE 
